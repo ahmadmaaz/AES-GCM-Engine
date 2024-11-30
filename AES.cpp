@@ -13,7 +13,7 @@ class AES{
     
     private:
         vector<unsigned char> key; // 256 bits or 32 bytes 
-        vector<vector<unsigned char>> ExpnadedKey{WORDCOUNT, vector<unsigned char>(4)}; // 60 words or 240 bytes
+        vector<vector<unsigned char>> ExpandedKey{WORDCOUNT, vector<unsigned char>(4)}; // 60 words or 240 bytes
 
         vector<unsigned char> Rcon = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40};
 
@@ -93,7 +93,7 @@ class AES{
                     temp[3] = ExpnadedKey[i-1][0];
 
                     for(int j = 0;j<4;j++){
-                        getSBOXvalue(temp[j]);
+                        temp[j] = getSBOXvalue(temp[j]);
                     }   
                     // xor with Rcon of the round
                     temp[0] = temp[0]^Rcon[i/8];
@@ -103,7 +103,7 @@ class AES{
                 else if(i%8 == 4){
                     temp = ExpnadedKey[i-1];
                     for(int j = 0;j<4;j++){
-                        getSBOXvalue(temp[j]);
+                        temp[j] = getSBOXvalue(temp[j]);
                     }
                     temp = XorFunction(temp, ExpnadedKey[i-8]);
                 }
@@ -116,11 +116,12 @@ class AES{
             }
         }
 
-        void getSBOXvalue(unsigned char& val){
+        unsigned char getSBOXvalue(unsigned char val) {
             unsigned char row = val >> 4;
             unsigned char col = val & 0x0F;
-            val = SBOX[row][col];
+            return SBOX[row][col];
         }
+
         vector<unsigned char> XorFunction(vector<unsigned char>& A, vector<unsigned char>& B){
             vector<unsigned char> C(4);
             C[0] = A[0]^B[0];
@@ -128,6 +129,24 @@ class AES{
             C[2] = A[2]^B[2];
             C[3] = A[3]^B[3];
             return C;
+        }
+
+        vector<vector<unsigned char>> AddRoundKey(vector<vector<unsigned char>> initialState, int roundNumber){
+
+            vector<vector<unsigned char>> newState(4, vector<unsigned char>(4));
+
+            if(rounNumber>14 || roundNumber<0){
+                throw invalid_argument("Invalid RoundNumber");
+            }
+            int start = roundNumber*4;
+            int end = start+4;
+
+            for(int i = start, idx = 0;i<end, idx<4;++i,++idx){
+                for(int j = 0;j<4;++j){
+                    newState[idx][j] = initialState[idx][j]^ExpandedKey[i][j];
+                }
+            }
+            return newState;
         }
 
         
@@ -150,9 +169,9 @@ class AES{
         }
         void displayExpandedKey() const {
             cout << "Expanded Key:\n";
-            for (int i = 0; i < ExpnadedKey.size(); ++i) {
+            for (int i = 0; i < ExpandedKey.size(); ++i) {
                 cout << "Word " << i << ": ";
-                for (unsigned char byte : ExpnadedKey[i]) {
+                for (unsigned char byte : ExpandedKey[i]) {
                     cout << hex << (int)byte << " ";
                 }
                 cout << "\n";
