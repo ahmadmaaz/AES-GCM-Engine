@@ -5,7 +5,7 @@
 #include <vector>
 using namespace std;
 
-
+constexpr int SIZE = 4;
 constexpr int KEYSIZE = 32;
 constexpr int WORDCOUNT = 60;
 
@@ -16,6 +16,13 @@ class AES{
         vector<vector<unsigned char>> ExpandedKey{WORDCOUNT, vector<unsigned char>(4)}; // 60 words or 240 bytes
 
         vector<unsigned char> Rcon = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40};
+
+        vector<vector<unsigned char>> mixMatrix = {
+            {0x02, 0x03, 0x01, 0x01},
+            {0x01, 0x02, 0x03, 0x01},
+            {0x01, 0x01, 0x02, 0x03},
+            {0x03, 0x01, 0x01, 0x02}
+        };
 
         vector<vector<unsigned char>> SBOX ={
 
@@ -135,13 +142,13 @@ class AES{
 
             vector<vector<unsigned char>> newState(4, vector<unsigned char>(4));
 
-            if(rounNumber>14 || roundNumber<0){
+            if(roundNumber>14 || roundNumber<0){
                 throw invalid_argument("Invalid RoundNumber");
             }
             int start = roundNumber*4;
             int end = start+4;
 
-            for(int i = start, idx = 0;i<end, idx<4;++i,++idx){
+            for(int i = start, idx = 0;i<end && idx<4;++i,++idx){
                 for(int j = 0;j<4;++j){
                     newState[idx][j] = initialState[idx][j]^ExpandedKey[i][j];
                 }
@@ -149,7 +156,64 @@ class AES{
             return newState;
         }
 
-        
+        void subBytes(vector<vector<unsigned char>>& state){
+            for(int i = 0;i<4;++i){
+                for(int j = 0;j<4;++j){
+                    state[i][j] = getSBOXvalue(state[i][j]);
+                }
+            }
+        }
+
+        // here I shift upwards beacuse I have taken the words and state as a row
+        // we have upwardCircularShift by 0, 1, 2 , 3 for columns 1, 2, 3, 4 respectively
+        void ShiftRows(vector<vector<unsigned char>>& state){
+
+            for (int col = 0; col < SIZE; ++col) {
+                
+                std::array<unsigned char, SIZE> tempColumn;
+
+                // Store the current column in tempColumn
+                for (int row = 0; row < SIZE; ++row) {
+                    tempColumn[row] = state[row][col];
+                }
+
+                
+                for (int row = 0; row < SIZE; ++row) {
+                    int newRow = (row + SIZE - col) % SIZE;  // We shift upward by 'col' positions
+                    state[newRow][col] = tempColumn[row];
+                }
+            }
+        }
+
+        unsigned char gmul(unsigned char a, unsigned char b) {
+            unsigned char p = 0; // The product
+            while (b) {
+                if (b & 1) p ^= a; // If the least significant bit of b is set, add a to p
+                bool high_bit_set = a & 0x80; // Check if the high bit of a is set
+                a <<= 1; // Multiply a by 2
+                if (high_bit_set) a ^= 0x1B; // XOR with the AES irreducible polynomial if needed
+                b >>= 1; // Divide b by 2
+            }
+            return p;
+        }
+
+        // here the word is given by a row also 
+        void mixCoulumns(vector<vector<unsigned char>>& state){
+            for (int col = 0; col < 4; ++col) {
+                vector<unsigned char> tempColumn(4);
+                for (int row = 0; row < 4; ++row) {
+                    tempColumn[row] =
+                        gmul(state[0][col], mixMatrix[row][0]) ^
+                        gmul(state[1][col], mixMatrix[row][1]) ^
+                        gmul(state[2][col], mixMatrix[row][2]) ^
+                        gmul(state[3][col], mixMatrix[row][3]);
+                }
+                for (int row = 0; row < 4; ++row) {
+                    state[row][col] = tempColumn[row];
+                }
+            }
+        }
+
 
 
     
