@@ -1,1 +1,6 @@
 out
+AES.exe
+output
+cmake-build-debug
+.vscode
+.idea
