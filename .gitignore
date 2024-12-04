@@ -1,6 +1,8 @@
+.idea
 out
 AES.exe
-output
-cmake-build-debug
 .vscode
-.idea
+cmake-build-debug/*
+output
+out.exe
+

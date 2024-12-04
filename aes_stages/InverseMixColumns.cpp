@@ -2,21 +2,19 @@
 // Created by ahmad on 12/1/2024.
 //
 
-#include <iostream>
-#include <cmath>
-#include <ctime>
-#include <random>
 #include <vector>
+#include "../Utils.h"
+
 
 using namespace std;
 
-class MixColumns{
+class InverseMixColumns{
 private:
-    vector<vector<unsigned char>> MIX_MATRIX = {
-            {0x02, 0x03, 0x01, 0x01},
-            {0x01, 0x02, 0x03, 0x01},
-            {0x01, 0x01, 0x02, 0x03},
-            {0x03, 0x01, 0x01, 0x02}
+    vector<ByteVector> MIX_MATRIX = {
+            {0x0e, 0x0b, 0x0d, 0x09},
+            {0x09, 0x0e, 0x0b, 0x0d},
+            {0x0d, 0x09, 0x0e, 0x0b},
+            {0x0b, 0x0d, 0x09, 0x0e}
     };
     unsigned char gmul(unsigned char a, unsigned char b) {
         unsigned char p = 0; // The product
@@ -30,9 +28,9 @@ private:
         return p;
     }
 public:
-    void run(vector<vector<unsigned char>>& state){
+    void run(vector<ByteVector>& state){
         for (int col = 0; col < 4; ++col) {
-            vector<unsigned char> tempColumn(4);
+            ByteVector tempColumn(4);
             for (int row = 0; row < 4; ++row) {
                 tempColumn[row] =
                         gmul(state[0][col], MIX_MATRIX[row][0]) ^
