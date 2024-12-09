@@ -1,0 +1,67 @@
+[33mcommit f3bc469b1240d77800a9e30d992bd43bd9d6388f[m[33m ([m[1;36mHEAD -> [m[1;32mmain[m[33m)[m
+Author: Mohammad Adel Alsoheil <alsoheilm@gmail.com>
+Date:   Sat Dec 7 16:44:13 2024 +0200
+
+    added encryption for Cuda C
+
+[33mcommit 04bb2aaf56e4d4b8393672541805c6d85e440fa2[m
+Author: Mohammad Adel Alsoheil <alsoheilm@gmail.com>
+Date:   Thu Dec 5 05:51:55 2024 +0200
+
+    added code for GHASH and GCTR, NOT SuRE
+
+[33mcommit eda3f96474cab59ad38a2b77ae6ea323ffb5d07a[m
+Author: Mohammad Adel Alsoheil <alsoheilm@gmail.com>
+Date:   Thu Dec 5 03:37:24 2024 +0200
+
+    added decrypt method and prepared env for CudaC
+
+[33mcommit bbfdcf78210fa10c8bfd8351de63a406888d2172[m
+Author: Ahmad Al Maaz <66618062+ahmadmaaz@users.noreply.github.com>
+Date:   Wed Dec 4 21:14:29 2024 +0200
+
+    GCM  (#2)
+    
+    * implement GCM mode seq
+    ---------
+    
+    Co-authored-by: Mohammad Adel Alsoheil <alsoheilm@gmail.com>
+
+[33mcommit bfe9e6ee5147558701f92a84c7c4ce054919f9e5[m
+Merge: 6b855ae a0cfd3b
+Author: Ahmad Al Maaz <66618062+ahmadmaaz@users.noreply.github.com>
+Date:   Mon Dec 2 20:53:53 2024 +0200
+
+    Merge pull request #1 from MohammadAdel-Alsoheil/seq
+    
+    apply oop & split stages to classes
+
+[33mcommit a0cfd3b113e7c060bdecc05cdedaf3c61ca714a4[m
+Author: Ahmad AlMaaz <ahmad.almaaz@lau.edu>
+Date:   Mon Dec 2 20:52:58 2024 +0200
+
+    apply oop & split stages to classes
+
+[33mcommit 6b855ae0c557ce03654102e8a0e5111fcf2bb085[m
+Author: Mohammad Adel Alsoheil <alsoheilm@gmail.com>
+Date:   Sat Nov 30 19:17:43 2024 +0200
+
+    added mix columns, but not sure if correct
+
+[33mcommit 6bf9c533bacffa761560067dd7899024f439aed1[m
+Author: Mohammad Adel Alsoheil <alsoheilm@gmail.com>
+Date:   Sat Nov 30 18:18:08 2024 +0200
+
+    added functionality for ADDRoundKey
+
+[33mcommit ead115f5a27e3032b62dab96553c884c3ccfdff5[m
+Author: Mohammad Adel Alsoheil <alsoheilm@gmail.com>
+Date:   Sat Nov 30 18:00:54 2024 +0200
+
+    changed SBOX logic
+
+[33mcommit 3dd1ef1117aa00c346a547f82a0f8fdbc1ca0b28[m
+Author: Mohammad Adel Alsoheil <alsoheilm@gmail.com>
+Date:   Sat Nov 30 17:43:13 2024 +0200
+
+    initialized environment added logic for key expansion
