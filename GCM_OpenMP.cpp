@@ -1,3 +1,5 @@
+// Created by ahmad on 12/5/2024.
+//
 #include <iostream>
 #include <vector>
 #include <cmath>
@@ -6,17 +8,17 @@
 #include "AES.cpp"
 #include "Ghash.h"
 #include <chrono>
+#include <omp.h>
 
 using namespace Utils;
 
 
-class GCM {
+class GCM_OpenMP {
 private:
     ByteVector key;
     ByteVector IV;
     ByteVector AAD;
     vector<ByteVector> gf128Res;
-
     void prepareCounter(ByteVector& counter, const ByteVector& IV) {
         // If IV is 96 bits, append 0x00000001 to form J0
         if (IV.size() == 12) {
@@ -40,22 +42,31 @@ private:
         }
     }
 
+    vector<ByteVector> GCTR(const ByteVector& ICB, const ByteVector& val) {
+        vector<ByteVector> X = nest(val, 16);
+        vector<ByteVector> res(X.size());
 
-    vector<ByteVector> GCTR(ByteVector ICB, ByteVector val){
-        AES aes(key);
-        ByteVector CB = ICB;
-        vector<ByteVector> X = nest(val,16);
-        vector<ByteVector> res;
-        for(int i = 0;i<X.size();++i){
-            ByteVector Y;
-            Y = xorF(aes.encrypt(CB), X[i]);
-            incrementCounter(CB);
-            res.push_back(Y);
+        // Precompute counters
+        vector<ByteVector> counters(X.size());
+        counters[0] = ICB;
+        for (int i = 1; i < X.size(); ++i) {
+            counters[i] = counters[i - 1];
+            incrementCounter(counters[i]);
+        }
+
+        // Parallel encryption
+#pragma omp parallel
+        {
+            AES aes(key);
+#pragma omp for
+            for (int i = 0; i < X.size(); ++i) {
+                ByteVector encryptedBlock = aes.encrypt(counters[i]);
+                res[i] = xorF(encryptedBlock, X[i]);
+            }
         }
 
         return res;
     }
-
     void computeGF128Power(const ByteVector&H,int size){
         this->gf128Res.resize(size);
         this->gf128Res[0]=H;
@@ -64,9 +75,10 @@ private:
         }
     }
 
+
     ByteVector GHASH(const ByteVector &val, const ByteVector &H) {
         // Break input into 16-byte blocks
-        std::vector<ByteVector> X = nest(val, 16);
+        vector<ByteVector> X = nest(val, 16);
         int numBlocks = X.size();
 
         // Precompute powers of H
@@ -75,44 +87,50 @@ private:
         // Initialize the tag (Y0 = 0)
         ByteVector tag(16, 0x00);
 
-        // Parallel processing with OpenMP using the custom reduction
-        for (int i = 0; i < numBlocks; ++i) {
-            // Access precomputed power of H
-            ByteVector hPower = this->gf128Res[numBlocks - i - 1]; // Correct index
+        // Parallel processing with OpenMP
+#pragma omp parallel shared(gf128Res, X)
+        {
+            // Thread-local partial tag
+            ByteVector localTag(16, 0x00);
 
-            // Multiply the current block by the corresponding power of H
-            ByteVector term = Ghash::gf128Multiply(X[i], hPower);
+#pragma omp for
+            for (int i = 0; i < numBlocks; ++i) {
+                // Access precomputed power of H
+                ByteVector hPower = this->gf128Res[numBlocks - i - 1]; // Correct index
 
-            // XOR into the reduction variable 'tag'
-            tag = xorF(tag, term);
+                // Multiply the current block by the corresponding power of H
+                ByteVector term = Ghash::gf128Multiply(X[i], hPower);
+
+                // XOR into the thread-local tag
+                localTag = xorF(localTag, term);
+            }
+
+            // Combine thread-local results into the global tag
+#pragma omp critical
+            {
+                tag = xorF(tag, localTag);
+            }
         }
 
         return tag; // Return the final computed tag
     }
-
-    ByteVector padC(ByteVector C, int u, int v, int sizeOfC, int sizeOfA) {
+    ByteVector padC(const ByteVector& C, int u, int v, int sizeOfC, int sizeOfA) {
         ByteVector res;
 
-        // Step 1: Add A to the result
         res.insert(res.end(), AAD.begin(), AAD.end());
 
-        // Step 2: Add 0^v (v/8 bytes for A padding)
         int paddingVBytes = v / 8;
         res.insert(res.end(), paddingVBytes, 0x00);
 
-        // Step 3: Add C to the result
         res.insert(res.end(), C.begin(), C.end());
 
-        // Step 4: Add 0^u (u/8 bytes for C padding)
         int paddingUBytes = u / 8;
         res.insert(res.end(), paddingUBytes, 0x00);
 
-        // Step 5: Encode len(A) as a 64-bit value and append
         ByteVector lenA64 = encodeLength(sizeOfA); // Length of A in bits
 
         res.insert(res.end(), lenA64.begin(), lenA64.end());
 
-        // Step 6: Encode len(C) as a 64-bit value and append
         ByteVector lenC64 = encodeLength(sizeOfC);
 
         res.insert(res.end(), lenC64.begin(), lenC64.end());
@@ -135,14 +153,13 @@ public:
 
 
     // for psuedo code reference https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
-    pair<ByteVector, ByteVector> encrypt(const ByteVector key, const ByteVector IV, const ByteVector AAD,
-                                         ByteVector P) {
-        this->AAD = AAD;
+    pair<ByteVector, ByteVector> encrypt(const ByteVector key,  const ByteVector IV, const ByteVector AAD,ByteVector P) {
+        this->AAD= AAD;
         this->IV = IV;
         this->key = key;
 
         AES aes(key);
-        int sizeOfPlainText = P.size();
+
         ByteVector H = aes.encrypt(ByteVector(16, 0x00));
 
 
@@ -153,77 +170,30 @@ public:
         incrementCounter(J0);
         vector<ByteVector> C = GCTR(J0, P);
         ByteVector newC = flatten(C);
+        newC.pop_back();
+        int sizeOfCinBits = newC.size()*8;
+        int sizeofAADinBits = AAD.size()*8;
 
-        //removes padding
-        while (sizeOfPlainText < newC.size()) {
-            newC.pop_back();
-            sizeOfPlainText++;
-        }
 
-        int sizeOfCinBits = newC.size() * 8;
-        int sizeofAADinBits = AAD.size() * 8;
+        int u = (128*ceil((double) sizeOfCinBits/128)) - sizeOfCinBits;
+        int v = (128*ceil((double) sizeofAADinBits/128)) - sizeofAADinBits;
 
-        int u = (128 * ceil((double) sizeOfCinBits / 128)) - sizeOfCinBits;
-        int v = (128 * ceil((double) sizeofAADinBits / 128)) - sizeofAADinBits;
 
-        ByteVector S = GHASH(padC(newC, u, v, sizeOfCinBits, sizeofAADinBits), H);
-
+        ByteVector S = GHASH(padC(newC,u,v, sizeOfCinBits,sizeofAADinBits ), H);
         prepareCounter(J0, this->IV);
-        vector<ByteVector> T = GCTR(J0, S);
+        vector<ByteVector> T = GCTR(J0,S);
         ByteVector newT = flatten(T);
 
 
-        return {newC, newT};
+
+        return { newC, newT };
     }
 
-    ByteVector decrypt(const ByteVector key, const ByteVector IV, const ByteVector AAD, ByteVector C, ByteVector T) {
-        // outputs plainText
-        this->AAD = AAD;
-        this->IV = IV;
-        this->key = key;
 
-        AES aes(key);
-        int sizeOfCipherText = C.size();
-        ByteVector H = aes.encrypt(ByteVector(16, 0x00));
-
-
-        ByteVector J0;
-        prepareCounter(J0, this->IV);
-
-
-        incrementCounter(J0);
-        vector<ByteVector> P = GCTR(J0, C);
-        ByteVector newP = flatten(P);
-
-        //removes padding
-        while (sizeOfCipherText < newP.size()) {
-            newP.pop_back();
-            sizeOfCipherText++;
-        }
-
-        int sizeOfCinBits = C.size() * 8;
-        int sizeofAADinBits = AAD.size() * 8;
-
-        int u = (128 * ceil((double) sizeOfCinBits / 128)) - sizeOfCinBits;
-        int v = (128 * ceil((double) sizeofAADinBits / 128)) - sizeofAADinBits;
-
-        ByteVector S = GHASH(padC(C, u, v, sizeOfCinBits, sizeofAADinBits), H);
-
-        prepareCounter(J0, this->IV);
-        vector<ByteVector> Tprime = GCTR(J0, S);
-        ByteVector newTprime = flatten(Tprime);
-
-        for (int i = 0; i < 16; ++i) {
-            if (T[i] != newTprime[i]) {
-                throw invalid_argument("There is no integrity between T and Tprime");
-            }
-        }
-
-        return newP;
-    }
 };
 
 int main(){
+    omp_set_num_threads(12);
     // Key (16 bytes)
     ByteVector Key = {
             0x4C, 0x97, 0x3D, 0xBC, 0x73, 0x64, 0x62, 0x16,
@@ -232,17 +202,18 @@ int main(){
             0x1A, 0x2C, 0xAA, 0x0F, 0xFE, 0x04, 0x07, 0xE5
     };
     // P (Plaintext, 64 bytes)
-    ByteVector P;
-
-    for(int i =0;i<1000;i++){
+    ByteVector P ;
+    for(int i =0;i<1000000;i++){
         P.push_back(0x00);
     }
 
+    // IV (Initialization Vector, 12 bytes)
     ByteVector IV = {
             0x7A, 0xE8, 0xE2, 0xCA, 0x4E, 0xC5, 0x00, 0x01,
             0x2E, 0x58, 0x49, 0x5C
     };
 
+    // A (Associated Data, 20 bytes)
     ByteVector A = {
             0x68, 0xF2, 0xE7, 0x76, 0x96, 0xCE, 0x7A, 0xE8,
             0xE2, 0xCA, 0x4E, 0xC5, 0x88, 0xE5, 0x4D, 0x00,
@@ -251,13 +222,11 @@ int main(){
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    GCM gcm;
+    GCM_OpenMP gcm;
     pair<ByteVector, ByteVector> res = gcm.encrypt(Key, IV, A,P);
     auto end_time = std::chrono::high_resolution_clock::now();
 
-    ByteVector deciphered = gcm.decrypt(Key,IV,A,res.first,res.second);
-    cout << "Decrypted Text: " + bytesToHex(deciphered) << "\n";
-    cout << "Cipher Text: " + bytesToHex(res.first) << "\n";
+//    cout << "Cipher Text: " + bytesToHex(res.first) << "\n";
     cout << "Added Tag: " + bytesToHex(res.second) << "\n";
     std::chrono::duration<double> elapsed_time = end_time - start_time;
 
