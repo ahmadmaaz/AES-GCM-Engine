@@ -1,110 +1,96 @@
+#include <wmmintrin.h>
+#include <stdio.h>
+#include <string.h>
 #include <iostream>
-
-#include <random>
 #include <vector>
-#include <iomanip>
-#include "./aes_stages/KeyExpansion.cpp"
-#include "./aes_stages/MixColumns.cpp"
-#include "./aes_stages/ShiftRows.cpp"
-#include "./aes_stages/InverseSubBytes.cpp"
-#include "./aes_stages/InverseMixColumns.cpp"
-#include "./aes_stages/InverseShiftRows.cpp"
 
 using namespace std;
 
-constexpr int SIZE = 4;
-constexpr int KEYSIZE = 32;
+typedef vector<uint8_t> ByteVector;
 
-class AES{
-
+class AES {
 private:
-    ByteVector key; // 256 bits or 32 bytes
-    vector<ByteVector> ExpandedKey{60, ByteVector(4)}; // 60 words or 240 bytes
-    vector<ByteVector> state{4,vector<unsigned  char>(4)};
-
-    void addRoundKey(int roundNumber){ //correct
-
-        int start = roundNumber * 4; // 0 for 1st round
-        for (int i = 0; i < 4; ++i) {
-            for (int j = 0; j < 4; ++j) {
-                state[j][i] = state[j][i] ^ ExpandedKey[start +i][j]; //changed this to (j,i)
-
-            }
-        }
-    }
-
-
-    void convertToStateMatrix(ByteVector bytes) {
-
-        for (size_t i = 0; i < bytes.size(); ++i) {
-            size_t col = i / 4;
-            size_t row = i % 4;
-            state[row][col] = bytes[i];
-        }
-
-    }
-    ByteVector stateToHexVector() {
-        ByteVector bytes;
-
-        for(int i = 0;i<4;++i){
-            for(int j = 0;j<4;++j){
-                bytes.push_back(state[j][i]);
-            }
-        }
-        return bytes;
-    }
+    ByteVector key;
+    __m128i key_schedule[15];
 
 public:
-    AES(ByteVector givenKey){
+    AES(const ByteVector& givenKey) {
+        if (givenKey.size() != 32) {
+            throw std::runtime_error("Key must be 256 bits (32 bytes)");
+        }
         key = givenKey;
-        KeyExpansion keyExpansion;
-        keyExpansion.run(key,ExpandedKey); // instead of calculating them everytime
+        key_expansion(key, key_schedule);
     }
 
-    ByteVector encrypt(ByteVector plainText){
-        convertToStateMatrix(plainText);
-        SubBytes subBytes;
-        ShiftRows shiftRows;
-        MixColumns mixColumns;
-        addRoundKey(0);
+    static __m128i key_expansion_part_1(__m128i key, __m128i keygened) {
+        keygened = _mm_shuffle_epi32(keygened, _MM_SHUFFLE(3, 3, 3, 3));
+        key = _mm_xor_si128(key, _mm_slli_si128(key, 4));
+        key = _mm_xor_si128(key, _mm_slli_si128(key, 4));
+        key = _mm_xor_si128(key, _mm_slli_si128(key, 4));
+        return _mm_xor_si128(key, keygened);
+    }
 
-        for(int i =1;i<=14;i++){
-            subBytes.runForState(state);
-            shiftRows.run(state);
-            if(i!=14){
-                mixColumns.run(state);
-            }
-            addRoundKey(i);
+    static __m128i key_expansion_part_2(__m128i key_lower, __m128i key_upper) {
+        key_upper = _mm_xor_si128(key_upper, _mm_slli_si128(key_upper, 0x4));
+        key_upper = _mm_xor_si128(key_upper, _mm_slli_si128(key_upper, 0x4));
+        key_upper = _mm_xor_si128(key_upper, _mm_slli_si128(key_upper, 0x4));
+        return _mm_xor_si128(key_upper, _mm_shuffle_epi32(_mm_aeskeygenassist_si128(key_lower, 0x00), 0xaa));
+    }
 
+    void key_expansion(const ByteVector& userkey, __m128i* Key_Schedule) {
+        __m128i lh = _mm_loadu_si128((__m128i*)userkey.data());
+        __m128i uh = _mm_loadu_si128((__m128i*)(userkey.data() + 16));
+
+        Key_Schedule[0] = lh;
+        Key_Schedule[1] = uh;
+
+        Key_Schedule[2] = key_expansion_part_1(Key_Schedule[0], _mm_aeskeygenassist_si128(Key_Schedule[1], 0x01));
+        Key_Schedule[3] = key_expansion_part_2(Key_Schedule[2], Key_Schedule[1]);
+
+        Key_Schedule[4] = key_expansion_part_1(Key_Schedule[2], _mm_aeskeygenassist_si128(Key_Schedule[3], 0x02));
+        Key_Schedule[5] = key_expansion_part_2(Key_Schedule[4], Key_Schedule[3]);
+
+        Key_Schedule[6] = key_expansion_part_1(Key_Schedule[4], _mm_aeskeygenassist_si128(Key_Schedule[5], 0x04));
+        Key_Schedule[7] = key_expansion_part_2(Key_Schedule[6], Key_Schedule[5]);
+
+        Key_Schedule[8] = key_expansion_part_1(Key_Schedule[6], _mm_aeskeygenassist_si128(Key_Schedule[7], 0x08));
+        Key_Schedule[9] = key_expansion_part_2(Key_Schedule[8], Key_Schedule[7]);
+
+        Key_Schedule[10] = key_expansion_part_1(Key_Schedule[8], _mm_aeskeygenassist_si128(Key_Schedule[9], 0x10));
+        Key_Schedule[11] = key_expansion_part_2(Key_Schedule[10], Key_Schedule[9]);
+
+        Key_Schedule[12] = key_expansion_part_1(Key_Schedule[10], _mm_aeskeygenassist_si128(Key_Schedule[11], 0x20));
+        Key_Schedule[13] = key_expansion_part_2(Key_Schedule[12], Key_Schedule[11]);
+
+        Key_Schedule[14] = key_expansion_part_1(Key_Schedule[12], _mm_aeskeygenassist_si128(Key_Schedule[13], 0x40));
+    }
+
+    void encrypt(const ByteVector& plaintext, ByteVector& ciphertext) {
+        ciphertext.resize(16);
+
+        __m128i plaintext_block = _mm_loadu_si128((__m128i*)plaintext.data());
+        plaintext_block = _mm_xor_si128(plaintext_block, key_schedule[0]);
+
+        for (int i = 1; i < 14; i++) {
+            plaintext_block = _mm_aesenc_si128(plaintext_block, key_schedule[i]);
+        }
+        plaintext_block = _mm_aesenclast_si128(plaintext_block, key_schedule[14]);
+
+        _mm_storeu_si128((__m128i*)ciphertext.data(), plaintext_block);
+    }
+
+    void decrypt(const ByteVector& ciphertext, ByteVector& plaintext) {
+        plaintext.resize(16);
+
+        __m128i ciphertext_block = _mm_loadu_si128((__m128i*)ciphertext.data());
+        ciphertext_block = _mm_xor_si128(ciphertext_block, key_schedule[14]);
+
+        for (int i = 13; i > 0; i--) {
+            ciphertext_block = _mm_aesdec_si128(ciphertext_block, _mm_aesimc_si128(key_schedule[i]));
         }
 
-        return stateToHexVector();
+        ciphertext_block = _mm_aesdeclast_si128(ciphertext_block, key_schedule[0]);
+
+        _mm_storeu_si128((__m128i*)plaintext.data(), ciphertext_block);
     }
-
-    ByteVector decrypt(ByteVector cipherText, ByteVector givenKey){
-        key = givenKey;
-        convertToStateMatrix(cipherText);
-        KeyExpansion keyExpansion;
-        InverseSubBytes inverseSuBytes;
-        InverseMixColumns inverseMixColumns;
-        InverseShiftRows inverseShiftRows;
-        keyExpansion.run(key,ExpandedKey);
-
-        for(int i = 14;i>=1;--i){
-            addRoundKey(i);
-            if(i!=14){
-                inverseMixColumns.run(state);
-            }
-            inverseShiftRows.run(state);
-            inverseSuBytes.runForState(state);
-        }
-
-        addRoundKey(0);
-
-        return stateToHexVector();
-
-
-    }
-
-
 };

@@ -8,7 +8,7 @@
 #include <vector>
 #include <string>
 using namespace std;
-using ByteVector= vector<unsigned char>;
+typedef vector<uint8_t> ByteVector;
 
 
 namespace  Utils {

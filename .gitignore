@@ -3,6 +3,8 @@ out
 AES.exe
 .vscode
 cmake-build-debug/*
+cmake-build-event-trace/*
 output
 out.exe
-
+CMakeFiles/*
+AES_Paralelized.

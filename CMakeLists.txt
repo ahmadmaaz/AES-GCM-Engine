@@ -3,12 +3,24 @@ project(AES_Paralelized)
 
 set(CMAKE_CXX_STANDARD 14)
 
-add_executable(AES_Paralelized
-        AES.cpp aes_stages/SubBytes.cpp aes_stages/ShiftRows.cpp aes_stages/MixColumns.cpp aes_stages/KeyExpansion.cpp GCM.cpp Utils.cpp Utils.h Ghash.cpp Ghash.h
-        GCM_MPI.cpp
-        GCM_OpenMP.cpp
-        CudaC/kernelsGCM.cu
-        CudaC/aes.h
-        CudaC/aes.c
-        OCB.cpp
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+
+# Enable AES-NI Intrinsics (SSE4.1, AES-NI)
+if(MSVC)
+    add_compile_options(/arch:AVX2)  # For MSVC
+else()
+    add_compile_options(-maes -msse4.1)  # For GCC/Clang
+endif()
+
+add_executable(
+        AES.cpp
+        Ghash.cpp
+        Utils.cpp
 )
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -maes -mpclmul -msse2")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0")
+
+if(CMAKE_BUILD_TYPE MATCHES Release)
+    add_compile_options(-O3)  # Enable optimizations
+endif()
