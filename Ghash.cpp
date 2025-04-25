@@ -8,6 +8,8 @@
 #include <immintrin.h>
 
 namespace Ghash{
+
+
     void clmul_x86(uint8_t r[16], const uint8_t a[16], const uint8_t b[16])
     {
         const __m128i MASK = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
@@ -67,4 +69,37 @@ namespace Ghash{
 
         _mm_storeu_si128((__m128i*)r, T3);
     }
+
+    void gf128MultiplyRaw(const uint8_t* a, const uint8_t* b, __m128i& lo, __m128i& hi) {
+        __m128i A = _mm_loadu_si128((const __m128i*)a);
+        __m128i B = _mm_loadu_si128((const __m128i*)b);
+
+        __m128i T0 = _mm_clmulepi64_si128(A, B, 0x00);
+        __m128i T1 = _mm_clmulepi64_si128(A, B, 0x01);
+        __m128i T2 = _mm_clmulepi64_si128(A, B, 0x10);
+        __m128i T3 = _mm_clmulepi64_si128(A, B, 0x11);
+
+        __m128i mid = _mm_xor_si128(T1, T2);
+
+        __m128i mid_lo = _mm_slli_si128(mid, 8);
+        __m128i mid_hi = _mm_srli_si128(mid, 8);
+
+        lo = _mm_xor_si128(T0, mid_lo);
+        hi = _mm_xor_si128(T3, mid_hi);
+    }
+
+    __m128i gf128Reduce(__m128i hi, __m128i lo) {
+        const __m128i R = _mm_set_epi32(0, 0, 0, 0x87);  // x^128 + x^7 + x^2 + x + 1
+        __m128i tmp1, tmp2;
+
+        // shift hi down to align with reduction polynomial
+        tmp1 = _mm_srli_epi64(hi, 63);
+        tmp2 = _mm_slli_epi64(hi, 1);
+        tmp1 = _mm_and_si128(tmp1, R); // apply mod poly only to high bits
+
+        __m128i reduced = _mm_xor_si128(lo, tmp2);
+        reduced = _mm_xor_si128(reduced, tmp1);
+        return reduced;
+    }
+
 }

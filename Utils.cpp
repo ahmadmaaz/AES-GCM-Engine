@@ -9,68 +9,63 @@
 #include <sstream>
 #include <iomanip>
 #include <emmintrin.h>
+#include <cstring>
+
 using namespace std;
 
 namespace Utils{
-    string bytesToHex(const ByteVector & byteVector) {
+    string bytesToHex(const Block & Block) {
         ostringstream hexStream;
-        for (unsigned char byte : byteVector) {
+        for (unsigned char byte : Block) {
             hexStream << hex << setw(2) << setfill('0') << static_cast<int>(byte);
         }
         return hexStream.str();
     }
 
+    vector<Block> nest(const Block& plainText, int blockSize) {
+        size_t total = plainText.size();
+        size_t numBlocks = (total + blockSize - 1) / blockSize;
 
-    vector<ByteVector> nest(const ByteVector& plainText,int size) {
-        vector<ByteVector> blocks;
+        vector<Block> blocks;
+        blocks.reserve(numBlocks);  // ✅ Avoid reallocations
 
-        for (size_t i = 0; i < plainText.size(); i += size) {
-            ByteVector block(size, 0x00);
-
-            for (size_t j = 0; j < size && (i + j) < plainText.size(); ++j) {
-                block[j] = plainText[i + j];
-            }
-            blocks.push_back(block);
+        for (size_t i = 0; i < total; i += blockSize) {
+            auto begin = plainText.begin() + i;
+            auto end = (i + blockSize < total) ? begin + blockSize : plainText.end();
+            blocks.emplace_back(begin, end);  // ✅ Construct in-place
+            blocks.back().resize(blockSize, 0x00); // ✅ Pad with 0x00 if needed
         }
-        while(size==4 && blocks.size()!=4){
-            blocks.push_back(ByteVector(0x00,4));
-        }
+
         return blocks;
     }
 
-    ByteVector flatten(const vector<ByteVector>& C) {
-        ByteVector result;
+    Block flatten(const vector<Block>& C) {
+        size_t total = 0;
+        for (const auto& block : C) total += block.size();
+
+        Block result(total);
+        uint8_t* ptr = result.data();
 
         for (const auto& block : C) {
-            result.insert(result.end(), block.begin(), block.end());
+            std::memcpy(ptr, block.data(), block.size());
+            ptr += block.size();
         }
 
         return result;
     }
-    ByteVector xorF(const ByteVector &a, const ByteVector &b) {
-        size_t len = a.size();
-        if (len != b.size()) throw std::invalid_argument("Vectors must be the same size");
 
-        ByteVector result(len);
+    void xorF(const uint8_t* a, const uint8_t* b, uint8_t* out) {
+        __m128i va = _mm_loadu_si128((const __m128i*)a);
+        __m128i vb = _mm_loadu_si128((const __m128i*)b);
+        __m128i vr = _mm_xor_si128(va, vb);
+        _mm_storeu_si128((__m128i*)out, vr);
+    }
 
-        size_t i = 0;
-        size_t blocks = len / 16;
-
-        for (; i < blocks * 16; i += 16) {
-            __m128i va = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&a[i]));
-            __m128i vb = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&b[i]));
-            __m128i vr = _mm_xor_si128(va, vb);
-            _mm_storeu_si128(reinterpret_cast<__m128i*>(&result[i]), vr);
-        }
-
-        uint8_t* resPtr = result.data() + i;
-        const uint8_t* aPtr = a.data() + i;
-        const uint8_t* bPtr = b.data() + i;
-
-        for (; i < len; ++i) {
-            *resPtr++ = *aPtr++ ^ *bPtr++;
-        }
-
+    Block xorF(const Block &a, const Block &b) {
+        Block result;
+        result.resize(16);
+        xorF(a.data(), b.data(), result.data());
         return result;
     }
+
 }

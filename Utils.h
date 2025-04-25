@@ -7,15 +7,18 @@
 
 #include <vector>
 #include <string>
+#include <array>
+
 using namespace std;
-typedef vector<uint8_t> ByteVector;
+using Block  = std::vector<uint8_t>;
 
 
 namespace  Utils {
-    string bytesToHex(const ByteVector& byteVector);
-    ByteVector xorF(const ByteVector &A, const ByteVector &B);
-    vector<ByteVector> nest(const ByteVector& plainText, int size);
-    ByteVector flatten(const vector<ByteVector>& C);
+    string bytesToHex(const Block& Block);
+    void xorF(const uint8_t* a, const uint8_t* b, uint8_t* out);
+    vector<Block> nest(const Block& plainText, int size);
+    Block flatten(const vector<Block>& C);
+    Block xorF(const Block &a, const Block &b);
 };
 
 

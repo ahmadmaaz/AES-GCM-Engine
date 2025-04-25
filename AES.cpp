@@ -3,18 +3,19 @@
 #include <string.h>
 #include <iostream>
 #include <vector>
+#include <array>
 
 using namespace std;
 
-typedef vector<uint8_t> ByteVector;
+using Block  = vector<uint8_t>;
 
 class AES {
 private:
-    ByteVector key;
+    Block key;
     __m128i key_schedule[15];
 
 public:
-    AES(const ByteVector& givenKey) {
+    AES(const Block& givenKey) {
         if (givenKey.size() != 32) {
             throw std::runtime_error("Key must be 256 bits (32 bytes)");
         }
@@ -37,7 +38,7 @@ public:
         return _mm_xor_si128(key_upper, _mm_shuffle_epi32(_mm_aeskeygenassist_si128(key_lower, 0x00), 0xaa));
     }
 
-    void key_expansion(const ByteVector& userkey, __m128i* Key_Schedule) {
+    void key_expansion(const Block& userkey, __m128i* Key_Schedule) {
         __m128i lh = _mm_loadu_si128((__m128i*)userkey.data());
         __m128i uh = _mm_loadu_si128((__m128i*)(userkey.data() + 16));
 
@@ -65,7 +66,7 @@ public:
         Key_Schedule[14] = key_expansion_part_1(Key_Schedule[12], _mm_aeskeygenassist_si128(Key_Schedule[13], 0x40));
     }
 
-    void encrypt(const ByteVector& plaintext, ByteVector& ciphertext) {
+    void encrypt(const Block& plaintext, Block& ciphertext) {
         ciphertext.resize(16);
 
         __m128i plaintext_block = _mm_loadu_si128((__m128i*)plaintext.data());
@@ -79,7 +80,7 @@ public:
         _mm_storeu_si128((__m128i*)ciphertext.data(), plaintext_block);
     }
 
-    void decrypt(const ByteVector& ciphertext, ByteVector& plaintext) {
+    void decrypt(const Block& ciphertext, Block& plaintext) {
         plaintext.resize(16);
 
         __m128i ciphertext_block = _mm_loadu_si128((__m128i*)ciphertext.data());
