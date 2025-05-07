@@ -12,86 +12,83 @@
 #include "Ghash.h"
 #include <chrono>
 #include <omp.h>
-#include <algorithm>
 #include <functional>
+#include <immintrin.h>
 using namespace Utils;
 
 
 class GCM {
 private:
-    Block key;
-    Block IV;
-    Block AAD;
+    BlockN<32> key;
+    BlockN<12> IV;
+    BlockN<20> AAD;
 
-    void prepareCounter(Block& counter, const Block& IV) {
-        // If IV is 96 bits, append 0x00000001 to form J0
-        if (IV.size() == 12) {
-            counter = IV;
-            counter.push_back(0x00);
-            counter.push_back(0x00);
-            counter.push_back(0x00);
-            counter.push_back(0x01);
-        } else {
-            throw invalid_argument("IV must be 96 bits (12 bytes) in this implementation.");
-        }
+    __attribute__((always_inline)) inline
+    void prepareCounter(Block& counter, const BlockN<12>& IV) {
+        reinterpret_cast<uint64_t*>(counter.data())[0] =
+                reinterpret_cast<const uint64_t*>(IV.data())[0];
+        reinterpret_cast<uint64_t*>(counter.data())[1] =
+                reinterpret_cast<const uint64_t*>(IV.data())[1];
+
+        // Set counter (big-endian 0x00000001)
+        reinterpret_cast<uint32_t*>(counter.data())[3] = 0x01000000;
     }
 
 
 
     void incrementCounter(Block& counter) {
-        for (int i = 15; i >= 12; --i) { // Last 4 bytes represent the counter
-            if (++counter[i] != 0) {
-                break; // Stop incrementing if no overflow
-            }
-        }
+        uint8_t* p = counter.data() + 15;
+        while (++(*p--) == 0 && p >= counter.data() + 12) {}
     }
 
-    vector<Block> GCTR(const Block& ICB, const Block& val) {
-        vector<Block> X = nest(val, 16);
-        vector<Block> res(X.size(),Block(16));
+    ByteVector GCTR(const Block& ICB, const ByteVector& val) {
+        int nmbOfBlocks = round(val.size()/16);
+        ByteVector res(val.size());
 
         // Precompute counters
-        vector<Block> counters(X.size());
+        vector<Block> counters(nmbOfBlocks);
         counters[0] = ICB;
-        for (int i = 1; i < X.size(); ++i) {
+        for (int i = 1; i < nmbOfBlocks; ++i) {
             counters[i] = counters[i - 1];
             incrementCounter(counters[i]);
         }
 
+
         // Parallel encryption
+        AES aes(key);
+
         #pragma omp parallel
         {
-            AES aes(key);
         #pragma omp for
-            for (int i = 0; i < X.size(); ++i) {
+            for (int i = 0; i < nmbOfBlocks; ++i) {
                 Block encryptedBlock;
                 aes.encrypt(counters[i],encryptedBlock);
-                xorF(encryptedBlock.data(), X[i].data(), res[i].data());
+
+                xorF(encryptedBlock.data(), val.data() + (i*16), res.data()+ (i*16));
             }
         }
 
         return res;
     }
 #pragma omp declare reduction(xorReduction : Block : \
-    omp_out = xorF(omp_out, omp_in)) initializer(omp_priv = Block(16, 0x00))
+    omp_out = xorF(omp_out, omp_in)) initializer(omp_priv = Block())
 
-    Block GHASH(const Block &val, const Block &H) {
+    Block GHASH(const ByteVector &val, const Block &H) {
         // Split input into 16-byte blocks
-        vector<Block> X = nest(val, 16);
-        int numBlocks = X.size();
+        int numBlocks = round((float)val.size()/16);
 
         vector<Block> gf128Res;
-
         this->computeGF128Power(H, numBlocks,gf128Res);
+//        this->computeGF128Power(H, numBlocks,gf128Res);
 
-        Block tag(16, 0x00);
+        Block tag{};
 
-#pragma omp parallel for reduction(xorReduction : tag)
+        #pragma omp parallel for reduction(xorReduction : tag)
         for (int i = 0; i < numBlocks; ++i) {
             Block hPower = gf128Res[numBlocks - i - 1];
 
-            Block term = gf128Multiply(X[i], hPower);
-//            tag = xorF2(tag,term);
+            Block term{};
+            gf128Multiply(val.data() +(i*16), hPower.data(),term.data());
 
             xorF(tag.data(),term.data(),tag.data());
         }
@@ -99,22 +96,24 @@ private:
         return tag;
     }
 
-    Block gf128Multiply(const Block &X, const Block &H) {
+    void gf128Multiply(const uint8_t* X, const uint8_t* H, const uint8_t* output) {
 
-        Block result(16);
-        Ghash::clmul_x86(result.data(), X.data(), H.data());
-        return result;
+        Ghash::clmul_x86(output, X, H);
     }
     void computeGF128Power(const Block&H,int size,vector<Block>& gf128Res){
         gf128Res.resize(size);
         gf128Res[0]=H;
+        #pragma omp for
         for(int i =1;i<size;i++){
-            gf128Res[i] = gf128Multiply(gf128Res[i-1],H);
+            gf128Multiply(gf128Res[i-1].data(),H.data(),gf128Res[i].data());
         }
     }
-    Block padC(const Block& C, int u, int v, uint64_t sizeOfC, uint64_t sizeOfA) {
+
+
+
+    ByteVector padC(const ByteVector& C, int u, int v, uint64_t sizeOfC, uint64_t sizeOfA) {
         size_t totalSize = AAD.size() + (v / 8) + C.size() + (u / 8) + 16;
-        Block res;
+        ByteVector res;
         res.reserve(totalSize);
 
         res.insert(res.end(), AAD.begin(), AAD.end());
@@ -122,8 +121,8 @@ private:
         res.insert(res.end(), C.begin(), C.end());
         res.resize(res.size() + u / 8, 0x00);
 
-        Block lenA64 = encodeLength(sizeOfA);
-        Block lenC64 = encodeLength(sizeOfC);
+        ByteVector lenA64 = encodeLength(sizeOfA);
+        ByteVector lenC64 = encodeLength(sizeOfC);
 
         res.insert(res.end(), lenA64.begin(), lenA64.end());
         res.insert(res.end(), lenC64.begin(), lenC64.end());
@@ -132,8 +131,8 @@ private:
     }
 
 
-    Block encodeLength(uint64_t len) {
-        Block encoded(8, 0);
+    ByteVector encodeLength(uint64_t len) {
+        ByteVector encoded(8, 0);
         for (int i = 7; i >= 0; --i) {
             encoded[i] = len & 0xFF;
             len >>= 8;
@@ -145,7 +144,7 @@ private:
 public:
 
 
-    pair<Block, Block> encrypt(const Block& key,  const Block& IV, const Block& AAD,const Block& P) {
+    pair<ByteVector, ByteVector> encrypt(const BlockN<32>& key,  const BlockN<12>& IV, const BlockN<20>& AAD,const ByteVector& P) {
         this->AAD= AAD;
         this->IV = IV;
         this->key = key;
@@ -153,83 +152,75 @@ public:
         AES aes(key);
         int sizeOfPlainText = P.size();
 
-        Block H;
-        aes.encrypt(Block(16, 0x00),H);
+        Block H{};
+        aes.encrypt(Block(),H);
 
-        Block J0;
+        Block J0{};
         prepareCounter(J0, this->IV);
         incrementCounter(J0);
 
-        vector<Block> C = GCTR(J0, P);
+        ByteVector C = GCTR(J0, P);
 
-        Block newC = flatten(C);
+//
+//        while (sizeOfPlainText < newC.size()) {
+//            newC.pop_back();
+//            sizeOfPlainText++;
+//        }
 
-        // Clean C
-        C.clear();
-        C.shrink_to_fit();
-
-        while (sizeOfPlainText < newC.size()) {
-            newC.pop_back();
-            sizeOfPlainText++;
-        }
-
-        int sizeOfCinBits = newC.size() * 8;
+        int sizeOfCinBits = C.size() * 8;
         int sizeofAADinBits = AAD.size() * 8;
 
         int u = (128 * ceil((double) sizeOfCinBits / 128)) - sizeOfCinBits;
         int v = (128 * ceil((double) sizeofAADinBits / 128)) - sizeofAADinBits;
 
 
-        Block S = GHASH(padC(newC, u, v, sizeOfCinBits, sizeofAADinBits), H);
+        Block S = GHASH(padC(C, u, v, sizeOfCinBits, sizeofAADinBits), H);
+
+        ByteVector T = GCTR(J0, ByteVector(S.begin(), S.end()));
 
 
-        vector<Block> T = GCTR(J0, S);
-        Block newT = flatten(T);
-
-
-        return { newC, newT };
+        return { C, T };
     }
 
 
 };
 
 int main(){
-    omp_set_num_threads(12);
+    omp_set_num_threads(2);
 
     // Key (16 bytes)
-    Block Key = {};
+    BlockN<32> Key{};
 
     for(int i =0;i<32;i++){
-        Key.push_back(0x00);
+        Key[i]=(0x00);
     }
-    Block P ;
-    long long N = 1000000 *100  ;
+    ByteVector P ;
+    long long N = 256 * 1000 ;
     for(int i =0;i<N;i++){
         P.push_back(0x00);
     }
 
     // IV (Initialization Vector, 12 bytes)
-    Block IV = {};
+    BlockN<12> IV{} ;
     for(int i =0;i<12;i++){
-        IV.push_back(0x00);
+        IV[i]=(0x00);
 
     }
 
     // A (Associated Data, 20 bytes)
-    Block A = {
-
-    };
+    BlockN<20> A{};
 
 
     auto start_time = chrono::high_resolution_clock::now();
 
     GCM gcm;
-    pair<Block, Block> res = gcm.encrypt(Key, IV, A,P);
+    pair<ByteVector , ByteVector> res = gcm.encrypt(Key, IV, A,P);
     auto end_time = chrono::high_resolution_clock::now();
 
     chrono::duration<double> elapsed_time = end_time - start_time;
 
     cout << "Added Tag: " + bytesToHex(res.second) << "\n";
+
     cout << "Elapsed Time: " << elapsed_time.count() << " seconds" << std::endl;
 
     double dataSizeBytes = N;

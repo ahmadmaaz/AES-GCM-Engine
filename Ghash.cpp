@@ -10,7 +10,7 @@
 namespace Ghash{
 
 
-    void clmul_x86(uint8_t r[16], const uint8_t a[16], const uint8_t b[16])
+    void clmul_x86(const uint8_t r[16], const uint8_t a[16], const uint8_t b[16])
     {
         const __m128i MASK = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 

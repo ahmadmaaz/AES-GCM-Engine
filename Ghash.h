@@ -9,7 +9,7 @@
 #include "Utils.h"
 
 namespace Ghash {
-    void clmul_x86(uint8_t r[16], const uint8_t a[16], const uint8_t b[16]);
+    void clmul_x86(const uint8_t r[16], const uint8_t a[16], const uint8_t b[16]);
 
     __m128i gf128Reduce(__m128i hi, __m128i lo);
 

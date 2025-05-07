@@ -4,18 +4,17 @@
 #include <iostream>
 #include <vector>
 #include <array>
-
+#include "Utils.h"
 using namespace std;
 
-using Block  = vector<uint8_t>;
 
 class AES {
 private:
-    Block key;
+    BlockN<32> key;
     __m128i key_schedule[15];
 
 public:
-    AES(const Block& givenKey) {
+    AES(const BlockN<32>& givenKey) {
         if (givenKey.size() != 32) {
             throw std::runtime_error("Key must be 256 bits (32 bytes)");
         }
@@ -38,7 +37,7 @@ public:
         return _mm_xor_si128(key_upper, _mm_shuffle_epi32(_mm_aeskeygenassist_si128(key_lower, 0x00), 0xaa));
     }
 
-    void key_expansion(const Block& userkey, __m128i* Key_Schedule) {
+    void key_expansion(const BlockN<32>& userkey, __m128i* Key_Schedule) {
         __m128i lh = _mm_loadu_si128((__m128i*)userkey.data());
         __m128i uh = _mm_loadu_si128((__m128i*)(userkey.data() + 16));
 
@@ -67,7 +66,6 @@ public:
     }
 
     void encrypt(const Block& plaintext, Block& ciphertext) {
-        ciphertext.resize(16);
 
         __m128i plaintext_block = _mm_loadu_si128((__m128i*)plaintext.data());
         plaintext_block = _mm_xor_si128(plaintext_block, key_schedule[0]);
@@ -81,7 +79,6 @@ public:
     }
 
     void decrypt(const Block& ciphertext, Block& plaintext) {
-        plaintext.resize(16);
 
         __m128i ciphertext_block = _mm_loadu_si128((__m128i*)ciphertext.data());
         ciphertext_block = _mm_xor_si128(ciphertext_block, key_schedule[14]);
